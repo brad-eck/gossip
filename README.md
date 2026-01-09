@@ -1,5 +1,5 @@
 ## Gossip (TUI-based CSSH Alternative)
-**IN PROGRESS**
+**IN PROGRESS**  
 This is a tool that was inspired by the difficulties clusterssh is having regarding its dependencies with el10. This tool is an effective alternative to cssh and should serve as a suitable replacement.
 
 ### Status
