@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -9,17 +10,29 @@ import (
 
 var (
 	titleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FF79C6")).
+			Foreground(lipgloss.Color("#F8F8F2")).
+			Background(lipgloss.Color("#282A36")).
 			Bold(true).
-			Margin(1, 2)
+			Padding(0, 1)
+
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#FFB86C"))
+
+	hostStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F8F8F2"))
+
+	selectedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#50FA7B")).
+			Bold(true)
 
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6272A4")).
-			Margin(0, 2)
+			MarginTop(1)
 
 	helpStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#8BE9FD")).
-			Margin(1, 2)
+			Foreground(lipgloss.Color("#6272A4")).
+			MarginTop(1)
 )
 
 type Model struct {
@@ -28,12 +41,12 @@ type Model struct {
 	height     int
 	broadcast  bool
 	selected   int
-	hostCount  int
+	hosts  	   []string
 }
 
-func InitialModel(hostCount int) Model {
+func InitialModel(hosts []string) Model {
 	return Model{
-		hostCount: hostCount,
+		hosts: hosts,
 	}
 }
 
@@ -56,7 +69,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "b":
 			m.broadcast = !m.broadcast
 		case "j", "down":
-			if m.selected < m.hostCount-1 {
+			if m.selected < len(m.hosts)-1 {
 				m.selected++
 			}
 		case "k", "up":
@@ -74,30 +87,41 @@ func (m Model) View() string {
 		return "Initializing gossip..."
 	}
 
-	var s string
+	var s strings.Builder
 
-	// Title
-	s += titleStyle.Render("🗣️  Gossip — TUI Cluster SSH") + "\n\n"
+	title := "🗣️ Gossip — TUI Cluster SSH"
+	s.WriteString(titleStyle.Render(title) + "\n\n")
 
-	// Host list placeholder
-	s += lipgloss.NewStyle().Bold(true).Render("Connected Hosts:\n")
-	for i := 0; i < m.hostCount; i++ {
-		prefix := "  "
+	s.WriteString(headerStyle.Render("Hosts") + "\n")
+
+	for i, host := range m.hosts {
+		cursor := "  "
+		style := hostStyle
 		if i == m.selected {
-			prefix = "▶ "
+			cursor = "▶ "
+			style = selectedStyle
 		}
-		s += fmt.Sprintf("%sHost %d (placeholder)\n", prefix, i+1)
+
+		line := cursor + style.Render(host)
+		s.WriteString(line + "\n")
 	}
 
-	// Status bar
 	mode := "Single"
+	modeColor := lipgloss.Color("#FF5555") // red = single
 	if m.broadcast {
-		mode = "Broadcast 🌐"
+		mode = "Broadcast"
+		modeColor = lipgloss.Color("#50FA7B") // green = broadcast
 	}
-	s += "\n" + statusStyle.Render(fmt.Sprintf("Mode: %s | Selected: %d/%d", mode, m.selected+1, m.hostCount))
+	status := fmt.Sprintf("Mode: %s • Selected: %d/%d",
+		lipgloss.NewStyle().Foreground(modeColor).Render(mode),
+		m.selected+1,
+		len(m.hosts),
+	)
+	s.WriteString(statusStyle.Render(status) + "\n")
 
 	// Help
-	s += "\n\n" + helpStyle.Render("b: toggle broadcast • j/k: navigate • q: quit")
+	helpText := "j/k: navigate • b: toggle broadcast • q: quit"
+	s.WriteString(helpStyle.Render(helpText))
 
-	return s
+	return s.String()
 }
