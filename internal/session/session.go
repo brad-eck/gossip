@@ -103,5 +103,16 @@ func (s *Session) connectAndRun() {
 	go s.readOutput(io.MultiReader(stdout, stderr))
 }
 
+// Sends input to shell
+func (s *Session) Write(b []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.active || s.Stdin == nil {
+		return fmt.Errorf("session inactive")
+	}
+	_, err := s.Stdin.Write(b)
+	return err
+}
+
 
 
