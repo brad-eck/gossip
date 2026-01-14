@@ -33,6 +33,11 @@ var (
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#6272A4")).
 			MarginTop(1)
+
+	viewportStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#44475A")).
+			Padding(1, 2)
 )
 
 type Model struct {
