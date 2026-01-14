@@ -1,7 +1,17 @@
-## Gossip (TUI-based CSSH Alternative)
-**IN PROGRESS**  
-This is a tool that was inspired by the difficulties clusterssh is having regarding its dependencies with el10. This tool is an effective alternative to cssh and should serve as a suitable replacement.
+# Gossip - Modern TUI Alternative to ClusterSSH (cssh)
 
-### Status
-- Setting up basic project structure and working on initial functionality.
-- Testing a variety of different tools to determine which features to deploy for this tool
+**Gossip** is a lightweight, terminal-based tool that allows administrators to manage and interact with multiple remote servers. Whether its broadcasting a command to multiple sessions, or drilling down into a specific client, Gossip is the "Go" to tool for full control.   
+
+Gossip addresses the dependency and compatability pain points with cssh on el10 releases.
+
+## Features (Planned / In Progress)
+
+- Connect to multiple hosts simultaneously
+- Broadcast commands / input to all panes or selected groups
+- Tui interface with pane managemnt (split, zoom, resize)
+- Host grouping / tags (similar to cssh config)
+- SSH config integration
+- Copy/paste support
+
+## Installation
+Coming soon.
