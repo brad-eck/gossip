@@ -114,5 +114,75 @@ func (s *Session) Write(b []byte) error {
 	return err
 }
 
+func (s *Session) readOutput(r io.Reader) {
+	buf := make([]byte, 4096)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			s.Output <- data
+		}
+		if err != nil {
+			if err != io.EOF {
+				s.setError(fmt.Errorf("read error: %w", err))
+			}
+			return
+		}
+	}
+}
 
+func (s *Session) setError(err error) {
+	s.mu.Lock()
+	s.err = err
+	s.active = false
+	s.mu.Unlock()
+}
 
+func (s *Session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.active = false
+	if s.SSHSession != nil {
+		_ = s.SSHSession.Close()
+	}
+	if s.Client != nil {
+		_ = s.Client.Close()
+	}
+}
+
+// Helpers
+func parseUser(host string) string {
+	if i := strings.Index(host, "@"); i > 0 {
+		return host[:i]
+	}
+	return ""
+}
+
+func parseAddr(host string) string {
+	if i := strings.Index(host, "@"); i >= 0 {
+		host = host[i+1:]
+	}
+	if !strings.Contains(host, ":") {
+		host += ":22"
+	}
+	return host
+}
+
+func sshAgentSigners() ([]ssh.Signer, error) {
+	socket := os.Getenv("SSH_AUTH_SOCK")
+	if socket == "" {
+		return nil, fmt.Errorf("no SSH agent")
+	}
+	conn, err := net.Dial("unix", socket)
+	if err != nil {
+		return nil, err
+	}
+	client := ssh.AgentClient(conn)
+	signers, err := client.Signers()
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	return signers, nil
+}
