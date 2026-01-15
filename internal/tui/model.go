@@ -3,7 +3,10 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/brad-eck/gossip/internal/session"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -41,38 +44,81 @@ var (
 )
 
 type Model struct {
-	ready      bool
-	width      int
-	height     int
-	broadcast  bool
-	selected   int
-	hosts  	   []string
+	ready     bool
+	width     int
+	height    int
+	broadcast bool
+	selected  int
+	hosts     []string
+	sessions  map[int]*session.Session
+	viewports map[int]viewport.Model
+	outputBuf map[int]*strings.Builder
 }
 
 func InitialModel(hosts []string) Model {
-	return Model{
-		hosts: hosts,
+	m := Model{
+		hosts:     hosts,
+		sessions:  make(map[int]*session.Session),
+		viewports: make(map[int]viewport.Model),
+		outputBuf: make(map[int]*strings.Builder),
 	}
+
+	for i, h := range hosts {
+		sess := session.NewSession(h)
+		m.sessions[i] = sess
+		m.outputBuf[i] = &strings.Builder{}
+		vp := viewport.New(80, 20) // will be resized
+		vp.SetContent("")          // start empty
+		m.viewports[i] = vp
+	}
+
+	return m
 }
 
 func (m Model) Init() tea.Cmd {
-	return nil
+	return tea.Batch(
+		tea.EnterAltScreen,
+		m.tickOutput(),
+	)
 }
 
+func (m Model) tickOutput() tea.Cmd {
+	return tea.Every(80*time.Millisecond, func(t time.Time) tea.Msg {
+		return outputTickMsg{}
+	})
+}
+
+type outputTickMsg struct{}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		m.ready = true
-		return m, nil
+
+		// Resize viewports
+		vpHeight := msg.Height - 10 // leave space for title, hosts, status, help
+		for i := range m.hosts {
+			vp := m.viewports[i]
+			vp.Width = msg.Width - 6 // padding
+			vp.Height = vpHeight
+			m.viewports[i] = vp
+		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c", "q":
+			for _, s := range m.sessions {
+				s.Close()
+			}
 			return m, tea.Quit
+
 		case "b":
 			m.broadcast = !m.broadcast
+
 		case "j", "down":
 			if m.selected < len(m.hosts)-1 {
 				m.selected++
@@ -81,24 +127,63 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selected > 0 {
 				m.selected--
 			}
+
+		default:
+			// Send keystroke to selected or all
+			input := msg.String()
+			if input == "enter" {
+				input = "\r\n"
+			} else if len(input) == 1 {
+				input += "\r" // most terminals expect \r for enter
+			}
+
+			var targets []*session.Session
+			if m.broadcast {
+				for _, s := range m.sessions {
+					targets = append(targets, s)
+				}
+			} else {
+				targets = append(targets, m.sessions[m.selected])
+			}
+
+			for _, s := range targets {
+				_ = s.Write([]byte(input))
+			}
+		}
+
+	case outputTickMsg:
+		updated := false
+		for i, sess := range m.sessions {
+			select {
+			case data := <-sess.Output:
+				m.outputBuf[i].Write(data)
+				vp := m.viewports[i]
+				vp.SetContent(m.outputBuf[i].String())
+				m.viewports[i] = vp
+				updated = true
+			default:
+			}
+		}
+		if updated {
+			cmds = append(cmds, m.tickOutput())
 		}
 	}
 
-	return m, nil
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) View() string {
 	if !m.ready {
-		return "Initializing gossip..."
+		return "Connecting..."
 	}
 
-	var s strings.Builder
+	var sb strings.Builder
 
-	title := "🗣️ Gossip — TUI Cluster SSH"
-	s.WriteString(titleStyle.Render(title) + "\n\n")
+	// Title
+	sb.WriteString(titleStyle.Render(" 🗣️ Gossip — TUI Cluster SSH ") + "\n\n")
 
-	s.WriteString(headerStyle.Render("Hosts") + "\n")
-
+	// Hosts list
+	sb.WriteString(headerStyle.Render("Hosts") + "\n")
 	for i, host := range m.hosts {
 		cursor := "  "
 		style := hostStyle
@@ -106,27 +191,30 @@ func (m Model) View() string {
 			cursor = "▶ "
 			style = selectedStyle
 		}
-
-		line := cursor + style.Render(host)
-		s.WriteString(line + "\n")
+		sb.WriteString(cursor + style.Render(host) + "\n")
 	}
 
+	// Selected session output
+	sb.WriteString("\n" + headerStyle.Render("Output: "+m.hosts[m.selected]) + "\n")
+	vp := m.viewports[m.selected]
+	sb.WriteString(viewportStyle.Render(vp.View()) + "\n")
+
+	// Status
 	mode := "Single"
-	modeColor := lipgloss.Color("#FF5555") // red = single
+	modeColor := lipgloss.Color("#FF5555")
 	if m.broadcast {
 		mode = "Broadcast"
-		modeColor = lipgloss.Color("#50FA7B") // green = broadcast
+		modeColor = lipgloss.Color("#50FA7B")
 	}
 	status := fmt.Sprintf("Mode: %s • Selected: %d/%d",
 		lipgloss.NewStyle().Foreground(modeColor).Render(mode),
 		m.selected+1,
 		len(m.hosts),
 	)
-	s.WriteString(statusStyle.Render(status) + "\n")
+	sb.WriteString(statusStyle.Render(status) + "\n")
 
 	// Help
-	helpText := "j/k: navigate • b: toggle broadcast • q: quit"
-	s.WriteString(helpStyle.Render(helpText))
+	sb.WriteString(helpStyle.Render("j/k: navigate • b: toggle broadcast • q: quit"))
 
-	return s.String()
+	return sb.String()
 }
