@@ -100,7 +100,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 
 		// Resize viewports
-		vpHeight := msg.Height - 10 // leave space for title, hosts, status, help
+		headerLines := 2 + len(m.hosts) + 4      // title + hosts + separators + status/help rough estimate
+		vpHeight := msg.Height - headerLines - 5 // extra margin for safety
+		if vpHeight < 5 {
+			vpHeight = 5 // minimum useful height
+		}
+
 		for i := range m.hosts {
 			vp := m.viewports[i]
 			vp.Width = msg.Width - 6 // padding
@@ -154,19 +159,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case outputTickMsg:
 		updated := false
 		for i, sess := range m.sessions {
-			select {
-			case data := <-sess.Output:
-				m.outputBuf[i].Write(data)
+		drainLoop:
+			for { // drain all pending data in one tick
+				select {
+				case data := <-sess.Output:
+					m.outputBuf[i].Write(data)
+					updated = true
+				default:
+					break drainLoop
+				}
+			}
+			if updated {
 				vp := m.viewports[i]
 				vp.SetContent(m.outputBuf[i].String())
+				vp.SetYOffset(vp.Height) // scroll to bottom
 				m.viewports[i] = vp
-				updated = true
-			default:
 			}
 		}
-		if updated {
-			cmds = append(cmds, m.tickOutput())
-		}
+		// Always continue ticking for smooth feel
+		cmds = append(cmds, m.tickOutput())
 	}
 
 	return m, tea.Batch(cmds...)
