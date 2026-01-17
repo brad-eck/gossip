@@ -44,15 +44,16 @@ var (
 )
 
 type Model struct {
-	ready     bool
-	width     int
-	height    int
-	broadcast bool
-	selected  int
-	hosts     []string
-	sessions  map[int]*session.Session
-	viewports map[int]viewport.Model
-	outputBuf map[int]*strings.Builder
+	ready      bool
+	width      int
+	height     int
+	broadcast  bool
+	selected   int
+	hosts      []string
+	sessions   map[int]*session.Session
+	viewports  map[int]viewport.Model
+	outputBuf  map[int]*strings.Builder
+	hostListVP viewport.Model
 }
 
 func InitialModel(hosts []string) Model {
@@ -65,13 +66,13 @@ func InitialModel(hosts []string) Model {
 
 	for i, h := range hosts {
 		sess := session.NewSession(h)
-		m.sessions[i] = sess
-		m.outputBuf[i] = &strings.Builder{}
-		vp := viewport.New(80, 20) // will be resized
-		vp.SetContent("")          // start empty
-		m.viewports[i] = vp
+        m.sessions[i] = sess
+        m.outputBuf[i] = &strings.Builder{}
+        vp := viewport.New(80, 20)
+        vp.SetContent("")
+        m.viewports[i] = vp
 	}
-
+	m.hostListVP = viewport.New(0, 0)
 	return m
 }
 
@@ -100,15 +101,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 
 		// Resize viewports
-		headerLines := 2 + len(m.hosts) + 4      // title + hosts + separators + status/help rough estimate
-		vpHeight := msg.Height - headerLines - 5 // extra margin for safety
-		if vpHeight < 5 {
-			vpHeight = 5 // minimum useful height
+		reservedTop := 4 + m.hostListVP.Height + 4
+		reservedBottom := 5
+		vpHeight := msg.Height - reservedTop - reservedBottom
+		if vpHeight < 10 {
+			vpHeight = 10 // minimum useful height
 		}
+		
+		desiredHostHeight := len(m.hosts) + 2
+		hostVPHeight := min(15, max(4, desiredHostHeight))
+		m.hostListVP.Width = m.width - 10
+		m.hostListVP.Height = hostVPHeight
 
 		for i := range m.hosts {
 			vp := m.viewports[i]
-			vp.Width = msg.Width - 6 // padding
+			vp.Width = msg.Width - 8 // padding
 			vp.Height = vpHeight
 			m.viewports[i] = vp
 		}
@@ -172,7 +179,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if updated {
 				vp := m.viewports[i]
 				vp.SetContent(m.outputBuf[i].String())
-				vp.SetYOffset(vp.Height) // scroll to bottom
+				vp.GotoBottom()
 				m.viewports[i] = vp
 			}
 		}
@@ -191,10 +198,10 @@ func (m Model) View() string {
 	var sb strings.Builder
 
 	// Title
-	sb.WriteString(titleStyle.Render(" 🗣️ Gossip — TUI Cluster SSH ") + "\n\n")
+	sb.WriteString(titleStyle.Render(" 🗣️ Gossip — TUI Cluster SSH ") + "\n")
 
 	// Hosts list
-	sb.WriteString(headerStyle.Render("Hosts") + "\n")
+	var hostContent strings.Builder
 	for i, host := range m.hosts {
 		cursor := "  "
 		style := hostStyle
@@ -202,13 +209,25 @@ func (m Model) View() string {
 			cursor = "▶ "
 			style = selectedStyle
 		}
-		sb.WriteString(cursor + style.Render(host) + "\n")
+		hostContent.WriteString(cursor + style.Render(host) + "\n")
 	}
 
-	// Selected session output
-	sb.WriteString("\n" + headerStyle.Render("Output: "+m.hosts[m.selected]) + "\n")
-	vp := m.viewports[m.selected]
-	sb.WriteString(viewportStyle.Render(vp.View()) + "\n")
+	// Set the content
+	m.hostListVP.SetContent(hostContent.String())
+
+	// Scroll to make the selected item visible (auto-center-ish)
+	targetLine := m.selected // each host = 1 line
+	halfHeight := m.hostListVP.Height / 2
+	if targetLine > halfHeight {
+		m.hostListVP.SetYOffset(targetLine - halfHeight)
+	} else {
+		m.hostListVP.SetYOffset(0)
+	}
+	// Alternative: always scroll to bottom if you prefer tail behavior
+	// m.hostListVP.GotoBottom()
+
+	sb.WriteString("\n" + headerStyle.Render("Hosts") + "\n")
+	sb.WriteString(viewportStyle.Render(m.hostListVP.View()) + "\n")
 
 	// Status
 	mode := "Single"
@@ -222,7 +241,7 @@ func (m Model) View() string {
 		m.selected+1,
 		len(m.hosts),
 	)
-	sb.WriteString(statusStyle.Render(status) + "\n")
+	sb.WriteString(statusStyle.Render(status))
 
 	// Help
 	sb.WriteString(helpStyle.Render("j/k: navigate • b: toggle broadcast • q: quit"))

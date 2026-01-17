@@ -105,6 +105,8 @@ func (s *Session) connectAndRun() {
 		return
 	}
 
+	_, _ = s.Stdin.Write([]byte("echo \"Wassup $HOST"))
+
 	go s.readOutput(io.MultiReader(stdout, stderr))
 }
 
